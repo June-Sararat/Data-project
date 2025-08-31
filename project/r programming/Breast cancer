@@ -1,0 +1,387 @@
+# Load the package
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(survival)
+library(survminer)
+
+# Read a csv file
+bc <- read_csv("Breast_Cancer.csv")
+
+# Clean data
+bc <- na.omit(bc)
+
+# Replace 'anaplastic; Grade IV' with '4' in the 'Grade' column
+
+# 1. Clean the data by removing leading/trailing spaces
+bc$Grade <- trimws(bc$Grade)
+
+# 2. Perform the replacement
+bc$Grade[bc$Grade == "anaplastic; Grade IV"] <- "4"
+
+# 3. Verify the result
+unique(bc$Grade)
+
+# Check the structure of the data
+glimpse(bc)
+
+# Check the number of patients in each group
+table(bc$Race, bc$Status)
+
+patients <- bc %>%
+  select(Race, Status) %>%
+  count(Race, Status) %>%
+  mutate(total = n) %>%
+  select(-n)%>%
+  View()
+
+#younger patients 
+younger_patients <- bc %>%
+  select (Age, Race, `Marital Status`, `Estrogen Status`, `Progesterone Status`, Status) %>%
+  arrange(Age) %>%
+  head(5) %>%
+  print()
+
+#older patients
+older_patients <- bc %>%
+  select(Age, Race, `Marital Status`, `Estrogen Status`, `Progesterone Status`, Status) %>%
+  arrange(-Age) %>%
+  head(5) %>%
+  print()
+
+# The percentage of patients
+
+percentage_patients <- bc %>%
+  select(Age) %>%
+  mutate(Age_group = case_when(
+    Age < 40 ~ "<40",
+    Age >= 40 & Age < 50 ~ "40-49",
+    Age >= 50 & Age <= 59 ~ "50-59",
+    Age >= 60 & Age <= 69 ~ "60-69",
+    TRUE ~ "Other"
+  )) %>%
+  count(Age_group) %>%
+  mutate(total = n, percentage_age_group = round((n / sum(n)) * 100)) %>%
+  arrange(-percentage_age_group) %>%
+  select(-n) %>%
+  print()
+
+# The Race of patients
+race_patients <- bc %>%
+  select(Race) %>%
+  mutate(Race_group = case_when(
+    Race == "White" ~ "White",
+    Race == "Black" ~ "Black",
+    TRUE ~"Other"
+  )) %>%
+  count(Race_group) %>%
+  mutate(total = n) %>%
+  select(-n) %>%
+  arrange(-total) %>%
+  print()
+
+# The percentage of dead patients within each racial group
+death_percentage_by_race <- bc %>%
+  select(Race, Status) %>%
+  mutate(Race_group = case_when(
+    Race == "White" ~ "White",
+    Race == "Black" ~ "Black",
+    TRUE ~ "Other"
+  )) %>%
+  group_by(Race_group) %>%
+  summarise( total_patients = n(),
+             dead_patients = sum(Status == "Dead", na.rm = TRUE)) %>%
+  mutate(percentage_dead = (dead_patients / total_patients) * 100) %>%
+  arrange(-total_patients) %>%
+  print()
+
+# The percentage of alive and dead patients within each racial group
+ad_percentage_by_race <- bc %>%
+  select(Race, Status) %>%
+  mutate(Race_group = case_when(
+    Race == "White" ~ "White",
+    Race == "Black" ~ "Black",
+    TRUE ~ "Other"
+  )) %>%
+  group_by(Race_group) %>%
+  summarise( total_patients = n(),
+    alive_patients = sum(Status == "Alive", na.rm = TRUE),
+    dead_patients = sum(Status == "Dead", na.rm = TRUE)) %>%
+  mutate(percentage_alive = round((alive_patients / total_patients) * 100),
+    percentage_dead = round((dead_patients / total_patients) * 100)) %>%
+  arrange(-total_patients) 
+
+plot_data <- ad_percentage_by_race %>%
+  pivot_longer(
+    cols = starts_with("percentage"),  
+    names_to = "Status_Type",   
+    values_to = "Percentage"
+  )
+
+ggplot(plot_data, aes(x = Race_group, y = Percentage, fill = Status_Type)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = paste0(Percentage, "%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5,
+            size = 4) +
+  labs(
+    title = "Percentage of Patients by Race and Status",
+    x = "Racial Group",
+    y = "Percentage",
+    fill = "Status"
+  ) +
+  scale_fill_manual(
+    values = c("percentage_alive" = "#80B3B3", "percentage_dead" = "#C65851"),
+    labels = c("percentage_alive" = "Alive", "percentage_dead" = "Dead")
+  ) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)
+  )
+
+# The Marital Status of patients
+marital_status <- bc %>%
+  select(`Marital Status`, Age) %>%
+  mutate(Marital_status_group = case_when(
+    `Marital Status` == "Married" ~ "Married",
+    `Marital Status` == "Divorced" ~ "Divorce",
+    `Marital Status` == "Single" ~ "Singel",
+    `Marital Status` == "Widowed" ~ "Windowed",
+    TRUE ~ "Separated"
+  )) %>%
+  count(Marital_status_group) %>%
+  mutate(total = n) %>%
+  select(-n) %>%
+  arrange(-total) %>%
+  print()
+
+# The Marital status of patients with in each age group
+marital_age_counts <- bc %>%
+  select(`Marital Status`, Age) %>%
+  mutate(Age_group = case_when(
+    Age < 40 ~ "<40",
+    Age >= 40 & Age < 50 ~ "40-49",
+    Age >= 50 & Age <= 59 ~ "50-59",
+    Age >= 60 & Age <= 69 ~ "60-69",
+    TRUE ~ "Other"
+  )) %>%
+  group_by(`Marital Status`, Age_group) %>%
+  summarise(count = n()) %>%
+  print()
+
+# stage
+tns_stage <- bc %>%
+  select(`T Stage`, `N Stage`, `6th Stage`) %>%
+  mutate(s_group = case_when(
+    bc$`6th Stage` == "IIA" ~ "IIA",
+    bc$`6th Stage`== "IIIA" ~ "IIIA",
+    bc$`6th Stage`== "IIB" ~ "IIB",
+    bc$`6th Stage`== "IIIB" ~ "IIIB",
+    TRUE ~ "IIIC"
+  )) %>%
+  count(s_group,`T Stage`, `N Stage`) %>%
+  arrange(s_group) %>%
+  mutate(total = n) %>%
+  select(-n) %>%
+  print()
+
+# The percentage of alive and dead patients within each tumor 
+d_patients <- bc %>%
+  select(Grade, Status) %>%
+  mutate(d_group = case_when(
+    Grade == 1 ~ "Well differentiated",
+    Grade == 2 ~ "Moderately differentiated",
+    Grade == 3 ~ "Poorly differentiated",
+    TRUE ~ "Undifferentiated"
+  )) %>%
+  group_by(d_group) %>%
+  summarise(total_patients = n(),
+            alive_patients = sum(Status == "Alive", na.rm = TRUE),
+            dead_patients = sum(Status == "Dead", na.rm = TRUE)) %>%
+  mutate(percentage_alive = round((alive_patients/total_patients)*100),
+    percentage_dead = round((dead_patients/total_patients)*100)) 
+  
+  
+plot_data_d <- d_patients %>%
+  pivot_longer(
+    cols = starts_with("percentage"),
+    names_to = "differentiate",
+    values_to = "Percentage"
+  )
+
+
+ggplot(plot_data_d, aes(x = d_group, y = Percentage, fill = differentiate)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = paste0(Percentage, "%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5,
+            size = 4) +
+  labs(
+    title = "The percentage of alive and dead patients within each tumor",
+    x = "Tumor",
+    y = "Percentage",
+    fill = "Status"
+  ) +
+  scale_fill_manual(
+    values = c("percentage_alive" = "#80B3B3", "percentage_dead" = "#C65851"),
+    labels = c("percentage_alive" = "Alive", "percentage_dead" = "Dead")
+  ) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)
+  )
+
+# The Number of Patients by Hormone Receptor Status
+hormone_status <- bc %>%
+  select(`Estrogen Status`, `Progesterone Status`,Status) %>%
+  mutate(hormone_group = case_when(
+    `Estrogen Status` == "Positive" & `Progesterone Status` == "Positive" ~ "ER+/PR+",
+    `Estrogen Status` == "Positive" & `Progesterone Status` == "Negative" ~ "ER+/PR-",
+    `Estrogen Status` == "Negative" & `Progesterone Status` == "Positive" ~ "ER-/PR+",
+    TRUE ~ "ER-/PR-"
+  )) %>%
+  group_by(hormone_group) %>%
+  summarise(alive_patients = sum(Status == "Alive", na.rm = TRUE),
+            dead_patients = sum(Status == "Dead", na.rm = TRUE)) 
+
+plot_data_had <- hormone_status %>%
+  pivot_longer(
+    cols = c(alive_patients, dead_patients),  
+    names_to = "patient_status",             
+    values_to = "count"                   
+  )
+
+ggplot(plot_data_had, aes(x = hormone_group , y = count, fill = patient_status)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = paste0(count)), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5,
+            size = 4) +
+  labs(
+    title = "Number of Patients by Hormone Receptor Status",
+    x = "Hormone Receptor Status",
+    y = "Number of Patients",
+    fill = "Status"
+  ) +
+  scale_fill_manual(
+    values = c("alive_patients" = "#80B3B3", "dead_patients" = "#C65851"),
+    labels = c("alive_patients" = "Alive", "dead_patients" = "Dead")
+  ) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5)
+  )
+ 
+# The precent of alive and dead patients within each Hormone Receptor Status
+hr_group <- bc %>%
+  select(`Estrogen Status`, `Progesterone Status`, Status) %>%
+  mutate(h_group = case_when(
+    `Estrogen Status` == "Positive" & `Progesterone Status` == "Positive" ~ "ER+/PR+",
+    `Estrogen Status` == "Positive" & `Progesterone Status` == "Negative" ~ "ER+/PR-",
+    `Estrogen Status` == "Negative" & `Progesterone Status` == "Positive" ~ "ER-/PR+",
+    TRUE ~ "ER-/PR-"
+  )) %>%
+  group_by(h_group) %>%
+  summarise(total_patients = n(),
+            alive_patients = sum(Status == "Alive", na.rm = TRUE),
+            dead_patients = sum(Status == "Dead", na.rm = TRUE)) %>%
+  mutate(percentage_alive = round((alive_patients / total_patients) * 100),
+         percentage_dead = round((dead_patients / total_patients) * 100)) %>%
+  arrange(-total_patients) %>%
+  View()
+  
+
+# The Number of Patients by Survival Months
+d_patients <- bc %>%
+  mutate(d_group = case_when(
+    Grade == 1 ~ "Well differentiated",
+    Grade == 2 ~ "Moderately differentiated",
+    Grade == 3 ~ "Poorly differentiated",
+    TRUE ~ "Undifferentiated"
+  )) 
+
+d_patients$dead <- ifelse(d_patients$Status == "Dead", 1, 0)
+
+fit <- survfit(Surv(d_patients$`Survival Months`, d_patients$dead) ~ d_patients$d_group)
+
+p <- ggsurvplot(
+  fit,
+  data = d_patients,
+  pval = TRUE,                     
+  risk.table = TRUE,
+  risk.table.title = "Patient Data at Various Time Points",
+  legend.title = "Tumor grade",
+  legend.labs = c("Moderately", "Poorly", "Undifferentiated", "Well"),
+  title = "Survival by Tumor grade",
+  xlab = "Survival Months",
+  ylab = "Survival Probability",
+  conf.int = FALSE,                   
+  ggtheme = theme_minimal(),
+  pval.coord = c(25, 0.25),
+  font.pval = c(5, "bold"),
+  palette = c("#191970", "#8B4513", "#B03060", "gray"), 
+  risk.table.fontsize = 3,
+  risk.table.height = 0.25, 
+  risk.table.y.text = TRUE,
+  risk.table.x.text = TRUE 
+)
+
+p$plot <- p$plot +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, family = "Arial"),
+    axis.title = element_text(size = 10, family = "Arial"),
+    axis.text = element_text(size = 10, family = "Arial" ),
+    legend.title = element_text(size = 10, family = "Arial"),
+    legend.text = element_text(size = 10, family = "Arial") 
+  )
+
+p$table <- p$table +
+  theme(
+    plot.title = element_text(size = 12),
+    axis.title.x = element_text(size = 9 , family = "Arial"),
+    axis.text.x = element_text(size = 9, family = "Arial" ),
+    axis.title.y = element_text(size = 9, family = "Arial")
+  )
+p
+
+# The calculate the dead and censored patients from each tumor grade in the Patient Data at Various Time Points table
+s_patients <- bc %>%
+  select(Grade, `Survival Months`, Status) %>%
+  mutate(d_group = case_when(
+    Grade == 1 ~ "Well differentiated",
+    Grade == 2 ~ "Moderately differentiated",
+    Grade == 3 ~ "Poorly differentiated",
+    TRUE ~ "Undifferentiated"
+  )) %>%
+  mutate(s_group = cut(`Survival Months`,
+                       breaks = c(0, 25, 50, 75, 100, Inf),
+                       labels = c("0-25", "25-50", "50-75", "75-100", "100+"),
+                       right = FALSE)) %>%
+  group_by(d_group, s_group) %>%
+  summarise(dead_patients = sum(Status == "Dead", na.rm = TRUE),
+            censored_patients = sum(Status == "Alive", na.rm = TRUE),
+            .groups = 'drop') %>%
+  print()
+
+# Dead patients
+dead_patients <- bc %>%
+  select(Age,Status) %>%
+  filter(Status == "Dead") %>%
+  count(Age, Status) %>%
+  mutate(total = n) %>%
+  arrange(-total) %>%
+  select(-n) %>%
+  head(10) %>%
+  View()
+
+# Alive patients
+alive_patients <- bc %>%
+  select(Age,Status) %>%
+  filter(Status == "Alive") %>%
+  count(Age, Status) %>%
+  mutate(total = n) %>%
+  arrange(-total) %>%
+  select(-n) %>%
+  head(10) %>%
+  View()
+
+
+
